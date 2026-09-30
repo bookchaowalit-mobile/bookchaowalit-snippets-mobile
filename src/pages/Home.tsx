@@ -1,13 +1,224 @@
-import { IonContent, IonHeader, IonPage, IonTitle, IonToolbar } from '@ionic/react';
-import React from 'react';
+import {
+  IonButton,
+  IonButtons,
+  IonChip,
+  IonContent,
+  IonFab,
+  IonFabButton,
+  IonHeader,
+  IonIcon,
+  IonInput,
+  IonItem,
+  IonLabel,
+  IonList,
+  IonModal,
+  IonNote,
+  IonPage,
+  IonSearchbar,
+  IonSelect,
+  IonSelectOption,
+  IonTextarea,
+  IonTitle,
+  IonToast,
+  IonToolbar,
+} from '@ionic/react';
+import { add, copyOutline, star, starOutline, trashOutline } from 'ionicons/icons';
+import React, { useMemo, useState } from 'react';
+import { type Snippet, LANGUAGES, detectLanguage, languageCounts, searchSnippets, validateSnippet } from '../lib/snippets';
+import { type SnippetDraft, copyText, useSnippets } from '../state/SnippetsContext';
 
-const Home: React.FC = () => (
-  <IonPage>
-    <IonHeader><IonToolbar><IonTitle>Snippets</IonTitle></IonToolbar></IonHeader>
-    <IonContent className="ion-padding">
-      <h2>Snippets</h2>
-      <p>Snippets — Mobile app (ionic)</p>
-    </IonContent>
-  </IonPage>
-);
+const EMPTY: SnippetDraft = { title: '', code: '', language: '', tags: '' };
+
+const Home: React.FC = () => {
+  const { snippets, save, remove, toggleFavorite } = useSnippets();
+  const [text, setText] = useState('');
+  const [language, setLanguage] = useState<string | null>(null);
+  const [favoritesOnly, setFavoritesOnly] = useState(false);
+  const [editing, setEditing] = useState<{ id?: string; draft: SnippetDraft } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
+
+  const results = useMemo(
+    () => searchSnippets(snippets, { text, language, favoritesOnly }),
+    [snippets, text, language, favoritesOnly],
+  );
+  const languages = useMemo(() => languageCounts(snippets), [snippets]);
+
+  const open = (s?: Snippet) => {
+    setError(null);
+    setEditing(
+      s ? { id: s.id, draft: { title: s.title, code: s.code, language: s.language, tags: s.tags.join(', ') } } : { draft: EMPTY },
+    );
+  };
+
+  const submit = () => {
+    if (!editing) return;
+    const problem = validateSnippet(editing.draft.title, editing.draft.code);
+    if (problem) {
+      setError(problem);
+      return;
+    }
+    save(editing.draft, editing.id);
+    setEditing(null);
+  };
+
+  const copy = async (s: Snippet) => setToast((await copyText(s.code)) ? `Copied “${s.title}”` : 'Copy failed');
+
+  const draft = editing?.draft;
+  const setDraft = (patch: Partial<SnippetDraft>) => setEditing((e) => (e ? { ...e, draft: { ...e.draft, ...patch } } : e));
+
+  return (
+    <IonPage>
+      <IonHeader>
+        <IonToolbar>
+          <IonTitle>Snippets</IonTitle>
+        </IonToolbar>
+        <IonToolbar>
+          <IonSearchbar value={text} onIonInput={(e) => setText(e.detail.value ?? '')} placeholder="Search title, tags, code" />
+        </IonToolbar>
+      </IonHeader>
+      <IonContent>
+        <div className="ion-padding-horizontal" role="group" aria-label="Filters">
+          <IonChip outline={!favoritesOnly} onClick={() => setFavoritesOnly((v) => !v)} aria-pressed={favoritesOnly}>
+            <IonIcon icon={star} />
+            <IonLabel>Favourites</IonLabel>
+          </IonChip>
+          {languages.map(([lang, count]) => (
+            <IonChip
+              key={lang}
+              outline={language !== lang}
+              onClick={() => setLanguage(language === lang ? null : lang)}
+              aria-pressed={language === lang}
+            >
+              <IonLabel>
+                {lang} ({count})
+              </IonLabel>
+            </IonChip>
+          ))}
+        </div>
+
+        <IonList>
+          {results.map((s) => (
+            <IonItem key={s.id} button detail={false} onClick={() => open(s)}>
+              <IonLabel>
+                <h2>{s.title}</h2>
+                <p>
+                  <code>{s.code.split('\n')[0]}</code>
+                </p>
+                <IonNote>
+                  {s.language}
+                  {s.tags.length > 0 && ` · #${s.tags.join(' #')}`}
+                </IonNote>
+              </IonLabel>
+              <IonButtons slot="end">
+                <IonButton
+                  aria-label={s.favorite ? 'Unfavourite' : 'Favourite'}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    toggleFavorite(s.id);
+                  }}
+                >
+                  <IonIcon slot="icon-only" icon={s.favorite ? star : starOutline} />
+                </IonButton>
+                <IonButton
+                  aria-label="Copy code"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void copy(s);
+                  }}
+                >
+                  <IonIcon slot="icon-only" icon={copyOutline} />
+                </IonButton>
+              </IonButtons>
+            </IonItem>
+          ))}
+        </IonList>
+        {results.length === 0 && (
+          <p className="ion-padding ion-text-center">
+            {snippets.length ? 'No snippets match your search.' : 'No snippets yet — tap + to save your first one.'}
+          </p>
+        )}
+
+        <IonFab slot="fixed" vertical="bottom" horizontal="end">
+          <IonFabButton onClick={() => open()} aria-label="New snippet">
+            <IonIcon icon={add} />
+          </IonFabButton>
+        </IonFab>
+
+        <IonModal isOpen={editing !== null} onDidDismiss={() => setEditing(null)}>
+          <IonHeader>
+            <IonToolbar>
+              <IonButtons slot="start">
+                <IonButton onClick={() => setEditing(null)}>Cancel</IonButton>
+              </IonButtons>
+              <IonTitle>{editing?.id ? 'Edit snippet' : 'New snippet'}</IonTitle>
+              <IonButtons slot="end">
+                <IonButton strong onClick={submit}>
+                  Save
+                </IonButton>
+              </IonButtons>
+            </IonToolbar>
+          </IonHeader>
+          {draft && (
+            <IonContent className="ion-padding">
+              <IonInput label="Title" labelPlacement="stacked" value={draft.title} onIonInput={(e) => setDraft({ title: e.detail.value ?? '' })} />
+              <IonTextarea
+                label="Code"
+                labelPlacement="stacked"
+                autoGrow
+                rows={6}
+                spellcheck={false}
+                autocapitalize="off"
+                style={{ fontFamily: 'monospace' }}
+                value={draft.code}
+                onIonInput={(e) => setDraft({ code: e.detail.value ?? '' })}
+              />
+              <IonSelect
+                label="Language"
+                labelPlacement="stacked"
+                value={draft.language}
+                onIonChange={(e) => setDraft({ language: e.detail.value })}
+              >
+                <IonSelectOption value="">Auto-detect ({detectLanguage(draft.code)})</IonSelectOption>
+                {LANGUAGES.map((l) => (
+                  <IonSelectOption key={l} value={l}>
+                    {l}
+                  </IonSelectOption>
+                ))}
+              </IonSelect>
+              <IonInput
+                label="Tags (comma or space separated)"
+                labelPlacement="stacked"
+                value={draft.tags}
+                onIonInput={(e) => setDraft({ tags: e.detail.value ?? '' })}
+              />
+              {error && (
+                <p role="alert" style={{ color: 'var(--ion-color-danger)' }}>
+                  {error}
+                </p>
+              )}
+              {editing?.id && (
+                <IonButton
+                  color="danger"
+                  fill="clear"
+                  expand="block"
+                  onClick={() => {
+                    remove(editing.id!);
+                    setEditing(null);
+                  }}
+                >
+                  <IonIcon slot="start" icon={trashOutline} />
+                  Delete snippet
+                </IonButton>
+              )}
+            </IonContent>
+          )}
+        </IonModal>
+
+        <IonToast isOpen={toast !== null} message={toast ?? ''} duration={1500} onDidDismiss={() => setToast(null)} />
+      </IonContent>
+    </IonPage>
+  );
+};
+
 export default Home;
