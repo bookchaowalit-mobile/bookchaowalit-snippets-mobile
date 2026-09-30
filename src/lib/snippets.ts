@@ -45,8 +45,25 @@ export function detectLanguage(code: string): string {
   return 'text';
 }
 
+/** Zero-width characters and BOM: invisible, but they make "js" and "js\u200B" different strings. */
+const INVISIBLE = /[\u200B-\u200D\u2060\uFEFF]/g;
+
+/**
+ * Splits on commas/whitespace, drops leading '#', and folds case, invisible
+ * characters and Unicode width/composition (NFKC: "ｊｓ" -> "js") so the same
+ * tag is never stored twice.
+ */
 export function normalizeTags(raw: string): string[] {
-  return [...new Set(raw.split(/[,\s]+/).map((t) => t.replace(/^#+/, '').toLowerCase()).filter(Boolean))].slice(0, 8);
+  return [
+    ...new Set(
+      raw
+        .normalize('NFKC')
+        .replace(INVISIBLE, '')
+        .split(/[,\s]+/)
+        .map((t) => t.replace(/^#+/, '').toLowerCase())
+        .filter(Boolean),
+    ),
+  ].slice(0, 8);
 }
 
 export interface SnippetQuery {
@@ -62,7 +79,7 @@ export interface SnippetQuery {
  * then most recently updated.
  */
 export function searchSnippets(snippets: Snippet[], q: SnippetQuery): Snippet[] {
-  const terms = (q.text ?? '').toLowerCase().split(/\s+/).filter(Boolean);
+  const terms = (q.text ?? '').normalize('NFC').toLowerCase().split(/\s+/).filter(Boolean);
   const scored: [Snippet, number][] = [];
   for (const s of snippets) {
     if (q.language && s.language !== q.language) continue;
@@ -71,9 +88,9 @@ export function searchSnippets(snippets: Snippet[], q: SnippetQuery): Snippet[] 
     let score = 0;
     let all = true;
     for (const t of terms) {
-      const inTitle = s.title.toLowerCase().includes(t);
-      const inTags = s.tags.some((tag) => tag.includes(t));
-      const inCode = s.code.toLowerCase().includes(t);
+      const inTitle = s.title.normalize('NFC').toLowerCase().includes(t);
+      const inTags = s.tags.some((tag) => tag.includes(t.replace(/^#+/, '') || t)); // "#react" finds tag "react"
+      const inCode = s.code.normalize('NFC').toLowerCase().includes(t);
       if (!inTitle && !inTags && !inCode) {
         all = false;
         break;
@@ -88,9 +105,10 @@ export function searchSnippets(snippets: Snippet[], q: SnippetQuery): Snippet[] 
 }
 
 export function validateSnippet(title: string, code: string): string | null {
-  if (!title.trim()) return 'Title is required.';
-  if (!code.trim()) return 'Code cannot be empty.';
-  if (code.length > 20_000) return 'Snippet is too large (max 20,000 characters).';
+  if (!title.replace(INVISIBLE, '').trim()) return 'Title is required.';
+  if (!code.replace(INVISIBLE, '').trim()) return 'Code cannot be empty.';
+  // Count code points so emoji/CJK-heavy snippets are measured as the user sees them.
+  if ([...code].length > 20_000) return 'Snippet is too large (max 20,000 characters).';
   return null;
 }
 
@@ -99,7 +117,7 @@ export function toMarkdown(s: Snippet): string {
   const longest = Math.max(2, ...(s.code.match(/`+/g) ?? []).map((m) => m.length));
   const fence = '`'.repeat(longest + 1);
   const lang = s.language === 'text' ? '' : s.language;
-  return `### ${s.title}\n\n${fence}${lang}\n${s.code.replace(/\n+$/, '')}\n${fence}\n`;
+  return `### ${s.title}\n\n${fence}${lang}\n${s.code.replace(/[\r\n]+$/, '')}\n${fence}\n`;
 }
 
 export function languageCounts(snippets: Snippet[]): [string, number][] {
@@ -120,6 +138,7 @@ export function parseSnippets(json: string | null): Snippet[] | null {
         typeof s.code === 'string' &&
         typeof s.language === 'string' &&
         Array.isArray(s.tags) &&
+        s.tags.every((t: unknown) => typeof t === 'string') &&
         typeof s.updatedAt === 'number',
     ).map((s) => ({ ...s, favorite: Boolean(s.favorite) }));
   } catch {

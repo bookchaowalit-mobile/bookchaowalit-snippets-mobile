@@ -46,3 +46,16 @@ Score: 7/10 (was 6/10) — tag filtering, keyboard-operable filters and componen
 - Accessibility: filter chips were click-only `IonChip`s; a `FilterChip` wrapper makes them focusable with Enter/Space and descriptive labels. Favourite/copy buttons now name the snippet.
 - Advisories: `npm audit --omit=dev` is clean; dev-only vite 5/esbuild/vitest findings need major upgrades.
 - Verified: typecheck, lint, vitest, `npm run build`.
+
+## Done in this pass (pass 3)
+
+Score: 7.5/10 (was 7/10) — edge-case hunt in `src/lib/snippets.ts`.
+
+- Bug (crash): stored snippets with non-string tags (e.g. `[1, null]`) passed `parseSnippets` and then
+  threw `tag.includes is not a function` on the first search. Such entries are now dropped.
+- Bug: tags differing only by zero-width characters, BOM, case or full-width form ("js", "js​", "ｊｓ")
+  were stored as separate tags; `normalizeTags` now folds NFKC + invisible characters.
+- Bug: invisible-only titles passed validation; the 20,000-character limit counted UTF-16 units.
+- Bug: searching "#react" did not find tag `react`; decomposed accents ("café") missed "Café".
+- Bug: CRLF code left a stray `\r` before the closing Markdown fence.
+- Verified: typecheck, lint, vitest (37), build; the 5 new tests fail on the previous code.

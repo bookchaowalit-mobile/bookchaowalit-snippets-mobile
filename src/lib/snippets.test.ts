@@ -102,3 +102,27 @@ describe('helpers', () => {
     expect(parseSnippets(JSON.stringify([good, { id: 1 }]))).toEqual([good]);
   });
 });
+
+describe('pass 3 edge cases', () => {
+  it('drops stored snippets whose tags are not strings instead of crashing search', () => {
+    const bad = JSON.stringify([{ ...snip('a'), tags: [1, null] }, snip('b', { tags: ['ok'] })]);
+    const list = parseSnippets(bad)!;
+    expect(list.map((s) => s.id)).toEqual(['b']);
+    expect(() => searchSnippets(list, { text: 'o' })).not.toThrow();
+  });
+  it('dedupes tags across zero-width characters, BOM and full-width forms', () => {
+    expect(normalizeTags('js, js\u200B, \uFEFFJS, ｊｓ, #react')).toEqual(['js', 'react']);
+  });
+  it('rejects invisible-only titles and counts code length in code points', () => {
+    expect(validateSnippet('\u200B', 'x')).toBe('Title is required.');
+    expect(validateSnippet('t', '😀'.repeat(15_000))).toBeNull();
+  });
+  it('matches "#tag" searches and decomposed accents', () => {
+    const list = [snip('a', { tags: ['react'] }), snip('b', { title: 'Caf\u00e9 menu' })];
+    expect(searchSnippets(list, { text: '#react' }).map((s) => s.id)).toEqual(['a']);
+    expect(searchSnippets(list, { text: 'cafe\u0301' }).map((s) => s.id)).toEqual(['b']);
+  });
+  it('does not leave a stray CR before the closing fence for CRLF code', () => {
+    expect(toMarkdown(snip('a', { code: 'x\r\n' }))).toBe('### a\n\n```\nx\n```\n');
+  });
+});
