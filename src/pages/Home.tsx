@@ -24,25 +24,60 @@ import {
 } from '@ionic/react';
 import { add, copyOutline, star, starOutline, trashOutline } from 'ionicons/icons';
 import React, { useMemo, useState } from 'react';
-import { type Snippet, LANGUAGES, detectLanguage, languageCounts, searchSnippets, validateSnippet } from '../lib/snippets';
+import {
+  type Snippet,
+  LANGUAGES,
+  detectLanguage,
+  languageCounts,
+  searchSnippets,
+  tagCounts,
+  validateSnippet,
+} from '../lib/snippets';
 import { type SnippetDraft, copyText, useSnippets } from '../state/SnippetsContext';
 
 const EMPTY: SnippetDraft = { title: '', code: '', language: '', tags: '' };
+
+/** IonChip is click-only; this makes filter chips focusable and keyboard-operable. */
+const FilterChip: React.FC<{ pressed: boolean; label: string; onToggle: () => void; children: React.ReactNode }> = ({
+  pressed,
+  label,
+  onToggle,
+  children,
+}) => (
+  <IonChip
+    aria-label={label}
+    aria-pressed={pressed}
+    onClick={onToggle}
+    onKeyDown={(e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        onToggle();
+      }
+    }}
+    outline={!pressed}
+    role="button"
+    tabIndex={0}
+  >
+    {children}
+  </IonChip>
+);
 
 const Home: React.FC = () => {
   const { snippets, save, remove, toggleFavorite } = useSnippets();
   const [text, setText] = useState('');
   const [language, setLanguage] = useState<string | null>(null);
+  const [tag, setTag] = useState<string | null>(null);
   const [favoritesOnly, setFavoritesOnly] = useState(false);
   const [editing, setEditing] = useState<{ id?: string; draft: SnippetDraft } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
   const results = useMemo(
-    () => searchSnippets(snippets, { text, language, favoritesOnly }),
-    [snippets, text, language, favoritesOnly],
+    () => searchSnippets(snippets, { text, language, tag, favoritesOnly }),
+    [snippets, text, language, tag, favoritesOnly],
   );
   const languages = useMemo(() => languageCounts(snippets), [snippets]);
+  const tags = useMemo(() => tagCounts(snippets), [snippets]);
 
   const open = (s?: Snippet) => {
     setError(null);
@@ -79,21 +114,28 @@ const Home: React.FC = () => {
       </IonHeader>
       <IonContent>
         <div className="ion-padding-horizontal" role="group" aria-label="Filters">
-          <IonChip outline={!favoritesOnly} onClick={() => setFavoritesOnly((v) => !v)} aria-pressed={favoritesOnly}>
+          <FilterChip label="Favourites only" pressed={favoritesOnly} onToggle={() => setFavoritesOnly((v) => !v)}>
             <IonIcon icon={star} />
             <IonLabel>Favourites</IonLabel>
-          </IonChip>
+          </FilterChip>
           {languages.map(([lang, count]) => (
-            <IonChip
+            <FilterChip
               key={lang}
-              outline={language !== lang}
-              onClick={() => setLanguage(language === lang ? null : lang)}
-              aria-pressed={language === lang}
+              label={`Language ${lang}, ${count}`}
+              pressed={language === lang}
+              onToggle={() => setLanguage(language === lang ? null : lang)}
             >
               <IonLabel>
                 {lang} ({count})
               </IonLabel>
-            </IonChip>
+            </FilterChip>
+          ))}
+          {tags.map(([t, count]) => (
+            <FilterChip key={`tag-${t}`} label={`Tag ${t}, ${count}`} pressed={tag === t} onToggle={() => setTag(tag === t ? null : t)}>
+              <IonLabel>
+                #{t} ({count})
+              </IonLabel>
+            </FilterChip>
           ))}
         </div>
 
@@ -112,7 +154,7 @@ const Home: React.FC = () => {
               </IonLabel>
               <IonButtons slot="end">
                 <IonButton
-                  aria-label={s.favorite ? 'Unfavourite' : 'Favourite'}
+                  aria-label={s.favorite ? `Unfavourite ${s.title}` : `Favourite ${s.title}`}
                   onClick={(e) => {
                     e.stopPropagation();
                     toggleFavorite(s.id);
@@ -121,7 +163,8 @@ const Home: React.FC = () => {
                   <IonIcon slot="icon-only" icon={s.favorite ? star : starOutline} />
                 </IonButton>
                 <IonButton
-                  aria-label="Copy code"
+                  aria-label={`Copy code of ${s.title}`}
+
                   onClick={(e) => {
                     e.stopPropagation();
                     void copy(s);
